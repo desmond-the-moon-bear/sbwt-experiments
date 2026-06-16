@@ -18,40 +18,40 @@ use sbwt::vodbg::pnsv::{
 };
 
 fn main() {
-    println!("reading data...");
+    comparison();
+}
+
+fn average_distance() {
+    println!("loading data...");
     let (index, lcs) = read_index_and_lcs(1);
     let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
 
-
-    let lower_bound = 8;
-    let upper_bound = 10;
-    let step = 5;
-
-    println!("creating lcs simd...");
     let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
+    println!("creating lcs_simd...");
     let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len());
 
-    // println!("creating matrix...");
-    // let matrix = PnsvMatrix::from_iterator(iterator, lcs.len(), lower_bound, upper_bound);
-
-    // println!("creating wavelet...");
-    // let wavelet = WWT::from_iterator(iterator, lower_bound - 1, upper_bound - lower_bound + 2);
-
-    println!("timing...");
-    for target_length in lower_bound..=upper_bound {
-        let (
-            nanos_per_previous,
-            nanos_per_next
-        // ) = statistics_impl_pnsv(&matrix, lcs.len(), step, target_length);
-        ) = statistics_impl_pnsv(&lcs_simd, lcs.len(), step, target_length);
-
-        println!("target_length: {}", target_length);
-        println!(
-            "pnsv matrix | p: {:.3} | n: {:.3}",
-            nanos_per_previous,
-            nanos_per_next,
-        );
+    for i in 10..30 {
+        average_distance_for_length(&lcs_simd, i);
     }
+}
+
+fn average_distance_for_length(lcs_simd: &LcsSimd, target_length: usize) {
+    let mut cumulative_distance: usize = 0;
+    let start_time = std::time::Instant::now();
+    for i in 0..lcs_simd.len() {
+        let previous = lcs_simd.previous(i, target_length);
+        cumulative_distance += i - previous;
+    }
+    let end_time = std::time::Instant::now();
+    let average_distance = cumulative_distance as f64 / lcs_simd.len() as f64;
+    let nanos = (end_time - start_time).as_nanos() as f64 / lcs_simd.len() as f64;
+    println!(
+        "tl: {}, average distance: {:.3}, ns: {:.3}, ratio: {:.3}",
+        target_length,
+        average_distance,
+        nanos,
+        average_distance / nanos,
+    );
 }
 
 fn comparison() {
@@ -59,8 +59,7 @@ fn comparison() {
     let (index, lcs) = read_index_and_lcs(1);
     let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
     println!("lcs.len: {}", lcs.len());
-    println!("index.n_sets: {}", sbwt.n_sets());
-    let queries = read_query(2);
+    let queries = read_query(3);
 
     // println!("creating standard bp structure...");
     // let lcs_pnsv = LcsPnsvBp::new(&lcs, 2048);
@@ -140,25 +139,16 @@ fn comparison() {
     // }
 }
 
-fn correctness() {
-    println!("loading data...");
-    let (index, lcs) = read_index_and_lcs(1);
-    let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
-
-    let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
-    let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len());
-    let wavelet = WWT::from_iterator(iterator, 7, 2);
-
-    let ten_percent = lcs.len() / 10;
-
-    for i in 0..lcs.len() {
-        for target_length in wavelet.lower_bound + 1..wavelet.lower_bound + wavelet.window_size {
-            let lcs_answer = lcs_simd.previous(i, target_length);
-            let wavelet_answer = wavelet.previous(i, target_length);
-            assert_eq!(lcs_answer, wavelet_answer, "p; i: {}, target_length: {}", i, target_length);
-            let lcs_answer = lcs_simd.next(i, target_length);
-            let wavelet_answer = wavelet.next(i, target_length);
-            assert_eq!(lcs_answer, wavelet_answer, "n; i: {}, target_length: {}", i, target_length);
+fn correctness(n: usize, first: &impl Pnsv, second: &impl Pnsv, target_length_lower: usize, target_length_upper: usize) {
+    let ten_percent = n / 10;
+    for i in 0..n {
+        for target_length in target_length_lower..=target_length_upper {
+            let first_answer = first.previous(i, target_length);
+            let second_answer = second.previous(i, target_length);
+            assert_eq!(first_answer, second_answer, "p; i: {}, target_length: {}", i, target_length);
+            let first_answer = first.next(i, target_length);
+            let second_answer = second.next(i, target_length);
+            assert_eq!(first_answer, second_answer, "n; i: {}, target_length: {}", i, target_length);
         }
         if i % ten_percent == ten_percent - 1 {
             println!("{}0%", 1 + i / ten_percent);
@@ -169,7 +159,7 @@ fn correctness() {
 fn simd_scan_compare() {
     let (index, lcs) = read_index_and_lcs(1);
     let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
-    let queries = read_query(2);
+    let queries = read_query(3);
 
     let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
     let lcs_simd = LcsSimd::from_iterator(iterator, lcs.len());
