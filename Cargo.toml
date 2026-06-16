@@ -1,0 +1,13 @@
+[package]
+name = "sbwt-experiments"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sbwt = { path = "../sbwt-rs-cli/api" }
+
+[profile.release]
+debug = "line-tables-only"
+
+# [build]
+# rustflags = ["-C", "target-cpu=native"]
