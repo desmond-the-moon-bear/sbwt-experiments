@@ -7,11 +7,12 @@ use sbwt::LcsArray;
 use sbwt::vodbg::{pnsv::Pnsv, benchmark::*};
 
 use sbwt::vodbg::pnsv::{
+    self,
     ABS,
     LcsPnsvBp,
     LcsSimd,
     PnsvDyn,
-    PnsvHybrid,
+    PnsvDynOwned,
     PnsvMatrix,
     PnsvMatrixSux,
     Ranges,
@@ -19,18 +20,64 @@ use sbwt::vodbg::pnsv::{
 };
 
 fn main() {
-    analyse_range_lengths(2);
+    env_logger::init();
+    comparison();
+}
+
+fn comparison() {
+    println!("loading data...");
+    let (index, lcs) = read_index_and_lcs(1);
+    let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
+    println!("lcs.len: {}", lcs.len());
+    let queries = read_query(3);
+
+    // println!("creating standard bp structure...");
+    // let bp = LcsPnsvBp::new(&lcs, 2048);
+
+    let pnsv_dyn = pnsv::pnsv_simd_fallback_matrix(&sbwt, &lcs);
+    drop(lcs);
+
+    print!("{}", 1);
+    for pnsv in &pnsv_dyn.structures {
+        print!(":{}", pnsv.max_target());
+    }
+    println!("(:30)");
+
+    // println!("creating wavelet...");
+    // let wavelet = WWT::from_iterator(iterator, 7, 4);
+
+    // println!("creating matrix sux...");
+    // let matrix = PnsvMatrixSux::from_iterator(iterator, lcs.len(), 8, 10);
+
+    let pnsv_dyn_index = StreamingIndex {
+        extend_right: &sbwt,
+        contract_left: &pnsv_dyn,
+        // contract_left: &bp,
+        n: sbwt.n_sets(),
+        k: sbwt.k(),
+    };
+
+    println!("running benchmarks...");
+
+    let lower = 1;
+    let upper = 31;
+
+    for bound in lower..upper {
+        print!("dyn,{},", bound);
+        benchmark_bms_separate_queries(&pnsv_dyn_index, &queries, bound);
+        println!();
+    }
 }
 
 fn analyse_range_lengths(argument_start: usize) {
     let mut args = std::env::args().skip(argument_start);
     let lcs_path = args.next().expect("expected lcs index path");
 
-    println!("{}", lcs_path);
-
     println!("reading data...");
     let mut lcs_reader = std::io::BufReader::new(std::fs::File::open(lcs_path).unwrap());
     let lcs = LcsArray::load(&mut lcs_reader).unwrap();
+
+    println!("count: {}", lcs.len());
 
     let k: usize = 31;
     let mut range_counts = vec![1_usize; k];
@@ -56,89 +103,6 @@ fn analyse_range_lengths(argument_start: usize) {
         previous_average_length = average_length;
         println!("tl: {} | avg: {:.3} | ratio: {:.3}", target_length, average_length, ratio);
     }
-}
-
-fn comparison() {
-    println!("loading data...");
-    let (index, lcs) = read_index_and_lcs(1);
-    let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
-    println!("lcs.len: {}", lcs.len());
-    let queries = read_query(3);
-
-    // println!("creating standard bp structure...");
-    // let bp = LcsPnsvBp::new(&lcs, 2048);
-
-    println!("creating ranges...");
-    let ranges = Ranges::new(&sbwt, sbwt.n_sets(), 7);
-    let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
-    println!("creating lcs_simd...");
-    let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len());
-
-    // println!("creating wavelet...");
-    // let wavelet = WWT::from_iterator(iterator, 7, 4);
-
-    // println!("creating matrix...");
-    // let matrix = PnsvMatrix::from_iterator(iterator, lcs.len(), 8, 10);
-
-    println!("creating matrix sux...");
-    let matrix = PnsvMatrixSux::from_iterator(iterator, lcs.len(), 8, 10);
-
-    drop(lcs);
-    
-    let pnsv_dyn = PnsvDyn {
-        structures: [&ranges, &matrix, &lcs_simd]
-    };
-
-    let pnsv_dyn_index = StreamingIndex {
-        extend_right: &sbwt,
-        contract_left: &pnsv_dyn,
-        n: sbwt.n_sets(),
-        k: sbwt.k(),
-    };
-
-    println!("running benchmarks...");
-
-    let lower = 8;
-    let upper = 16;
-
-    for bound in lower..upper {
-        print!("dyn,{},", bound);
-        benchmark_bms_separate_queries(&pnsv_dyn_index, &queries, bound);
-        println!();
-    }
-}
-
-fn average_distance() {
-    println!("loading data...");
-    let (index, lcs) = read_index_and_lcs(1);
-    let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
-
-    let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
-    println!("creating lcs_simd...");
-    let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len());
-
-    for i in 10..30 {
-        average_distance_for_length(&lcs_simd, i);
-    }
-}
-
-fn average_distance_for_length(lcs_simd: &LcsSimd, target_length: usize) {
-    let mut cumulative_distance: usize = 0;
-    let start_time = std::time::Instant::now();
-    for i in 0..lcs_simd.len() {
-        let previous = lcs_simd.previous(i, target_length);
-        cumulative_distance += i - previous;
-    }
-    let end_time = std::time::Instant::now();
-    let average_distance = cumulative_distance as f64 / lcs_simd.len() as f64;
-    let nanos = (end_time - start_time).as_nanos() as f64 / lcs_simd.len() as f64;
-    println!(
-        "tl: {}, average distance: {:.3}, ns: {:.3}, ratio: {:.3}",
-        target_length,
-        average_distance,
-        nanos,
-        average_distance / nanos,
-    );
 }
 
 fn correctness(n: usize, first: &impl Pnsv, second: &impl Pnsv, target_length_lower: usize, target_length_upper: usize) {
@@ -381,7 +345,7 @@ fn simd_bounded_scan_with_fallback_time() {
     let word_bound = item_bound.div_ceil(LcsSimd::LANES);
 
     println!("creating augmented bounded scan...");
-    let abs = ABS::from_iterator(&lcs_simd, iterator, lcs.len(), word_bound, target_length_lower, target_length_upper);
+    let abs = ABS::from_iterator(lcs_simd.clone(), iterator, word_bound, target_length_lower, target_length_upper);
 
     println!("timing...");
     for target_length in target_length_lower..=target_length_upper {
