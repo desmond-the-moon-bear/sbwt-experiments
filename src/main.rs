@@ -19,7 +19,44 @@ use sbwt::vodbg::pnsv::{
 };
 
 fn main() {
-    comparison();
+    analyse_range_lengths(2);
+}
+
+fn analyse_range_lengths(argument_start: usize) {
+    let mut args = std::env::args().skip(argument_start);
+    let lcs_path = args.next().expect("expected lcs index path");
+
+    println!("reading data...");
+    let mut lcs_reader = std::io::BufReader::new(std::fs::File::open(lcs_path).unwrap());
+    let lcs = LcsArray::load(&mut lcs_reader).unwrap();
+
+    let k: usize = 31;
+    let mut range_counts = vec![1_usize; k];
+
+    println!("counting...");
+    for i in 1..lcs.len() {
+        let item = lcs.access(i);
+        #[allow(clippy::needless_range_loop)]
+        for target_length in 1..k {
+            if item < target_length {
+                range_counts[target_length] += 1;
+                // println!("{}");
+            } else {
+                break;
+            }
+        }
+    }
+
+    let mut previous_average_length = 1.0_f64;
+    let mut average_length;
+    let mut ratio;
+    #[allow(clippy::needless_range_loop)]
+    for target_length in 1..k {
+        average_length = lcs.len() as f64 / range_counts[target_length] as f64;
+        ratio = previous_average_length / average_length;
+        previous_average_length = average_length;
+        println!("tl: {} | avg: {:.3} | ratio: {:.3}", target_length, average_length, ratio);
+    }
 }
 
 fn comparison() {
