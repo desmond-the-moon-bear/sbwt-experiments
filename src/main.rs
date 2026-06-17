@@ -13,12 +13,63 @@ use sbwt::vodbg::pnsv::{
     PnsvDyn,
     PnsvHybrid,
     PnsvMatrix,
+    PnsvMatrixSux,
     Ranges,
     WWT,
 };
 
 fn main() {
     comparison();
+}
+
+fn comparison() {
+    println!("loading data...");
+    let (index, lcs) = read_index_and_lcs(1);
+    let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
+    println!("lcs.len: {}", lcs.len());
+    let queries = read_query(3);
+
+    // println!("creating standard bp structure...");
+    // let bp = LcsPnsvBp::new(&lcs, 2048);
+
+    println!("creating ranges...");
+    let ranges = Ranges::new(&sbwt, sbwt.n_sets(), 7);
+    let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
+    println!("creating lcs_simd...");
+    let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len());
+
+    // println!("creating wavelet...");
+    // let wavelet = WWT::from_iterator(iterator, 7, 4);
+
+    // println!("creating matrix...");
+    // let matrix = PnsvMatrix::from_iterator(iterator, lcs.len(), 8, 10);
+
+    println!("creating matrix sux...");
+    let matrix = PnsvMatrixSux::from_iterator(iterator, lcs.len(), 8, 10);
+
+    drop(lcs);
+    
+    let pnsv_dyn = PnsvDyn {
+        structures: [&ranges, &matrix, &lcs_simd]
+    };
+
+    let pnsv_dyn_index = StreamingIndex {
+        extend_right: &sbwt,
+        contract_left: &pnsv_dyn,
+        n: sbwt.n_sets(),
+        k: sbwt.k(),
+    };
+
+    println!("running benchmarks...");
+
+    let lower = 8;
+    let upper = 16;
+
+    for bound in lower..upper {
+        print!("dyn,{},", bound);
+        benchmark_bms_separate_queries(&pnsv_dyn_index, &queries, bound);
+        println!();
+    }
 }
 
 fn average_distance() {
@@ -52,91 +103,6 @@ fn average_distance_for_length(lcs_simd: &LcsSimd, target_length: usize) {
         nanos,
         average_distance / nanos,
     );
-}
-
-fn comparison() {
-    println!("loading data...");
-    let (index, lcs) = read_index_and_lcs(1);
-    let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
-    println!("lcs.len: {}", lcs.len());
-    let queries = read_query(3);
-
-    // println!("creating standard bp structure...");
-    // let lcs_pnsv = LcsPnsvBp::new(&lcs, 2048);
-
-    println!("creating hybrid data structure...");
-    println!("creating ranges...");
-    let ranges = Ranges::new(&sbwt, sbwt.n_sets(), 7);
-    let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
-    println!("creating lcs_simd...");
-    let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len());
-    // println!("creating wavelet...");
-    // let wavelet = WWT::from_iterator(iterator, 7, 2);
-    // let pnsv_hybrid = PnsvHybrid {
-    //     ranges,
-    //     wavelet,
-    //     lcs_simd,
-    // };
-
-    println!("creating matrix...");
-    let matrix = PnsvMatrix::from_iterator(iterator, lcs.len(), 8, 10);
-    
-    let pnsv_dyn = PnsvDyn {
-        structures: [&ranges, &matrix, &lcs_simd]
-    };
-
-    // let lcs_index = StreamingIndex {
-    //     extend_right: &sbwt,
-    //     contract_left: &lcs,
-    //     n: sbwt.n_sets(),
-    //     k: sbwt.k(),
-    // };
-    //
-    // let lcs_pnsv_bp_index = StreamingIndex {
-    //     extend_right: &sbwt,
-    //     contract_left: &lcs_pnsv,
-    //     n: sbwt.n_sets(),
-    //     k: sbwt.k(),
-    // };
-    // let pnsv_hybrid_index = StreamingIndex {
-    //     extend_right: &sbwt,
-    //     contract_left: &pnsv_hybrid,
-    //     n: sbwt.n_sets(),
-    //     k: sbwt.k(),
-    // };
-    let pnsv_dyn_index = StreamingIndex {
-        extend_right: &sbwt,
-        contract_left: &pnsv_dyn,
-        n: sbwt.n_sets(),
-        k: sbwt.k(),
-    };
-
-    println!("running benchmarks...");
-
-    let lower = 8;
-    let upper = 31;
-
-    for bound in 1..upper {
-        print!("dyn,{},", bound);
-        benchmark_bms_separate_queries(&pnsv_dyn_index, &queries, bound);
-        println!();
-    }
-    // for bound in 1..upper {
-    //     print!("hyb,{},", bound);
-    //     benchmark_bms_separate_queries(&pnsv_hybrid_index, &queries, bound);
-    //     println!();
-    // }
-    // for bound in 1..upper {
-    //     print!("bp,{},", bound);
-    //     benchmark_bms_separate_queries(&lcs_pnsv_bp_index, &queries, bound);
-    //     println!();
-    // }
-    //
-    // for bound in lower..upper {
-    //     print!("scan,{},", bound);
-    //     benchmark_bms_separate_queries(&lcs_index, &queries, bound);
-    //     println!();
-    // }
 }
 
 fn correctness(n: usize, first: &impl Pnsv, second: &impl Pnsv, target_length_lower: usize, target_length_upper: usize) {
