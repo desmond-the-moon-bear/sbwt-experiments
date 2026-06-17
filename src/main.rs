@@ -26,6 +26,8 @@ fn analyse_range_lengths(argument_start: usize) {
     let mut args = std::env::args().skip(argument_start);
     let lcs_path = args.next().expect("expected lcs index path");
 
+    println!("{}", lcs_path);
+
     println!("reading data...");
     let mut lcs_reader = std::io::BufReader::new(std::fs::File::open(lcs_path).unwrap());
     let lcs = LcsArray::load(&mut lcs_reader).unwrap();
@@ -40,9 +42,6 @@ fn analyse_range_lengths(argument_start: usize) {
         for target_length in 1..k {
             if item < target_length {
                 range_counts[target_length] += 1;
-                // println!("{}");
-            } else {
-                break;
             }
         }
     }
