@@ -34,20 +34,8 @@ fn comparison() {
     // println!("creating standard bp structure...");
     // let bp = LcsPnsvBp::new(&lcs, 2048);
 
-    let pnsv_dyn = pnsv::pnsv_simd_fallback_matrix(&sbwt, &lcs);
+    let pnsv_dyn = pnsv::pnsv_matrix_simd(&sbwt, &lcs);
     drop(lcs);
-
-    print!("{}", 1);
-    for pnsv in &pnsv_dyn.structures {
-        print!(":{}", pnsv.max_target());
-    }
-    println!("(:30)");
-
-    // println!("creating wavelet...");
-    // let wavelet = WWT::from_iterator(iterator, 7, 4);
-
-    // println!("creating matrix sux...");
-    // let matrix = PnsvMatrixSux::from_iterator(iterator, lcs.len(), 8, 10);
 
     let pnsv_dyn_index = StreamingIndex {
         extend_right: &sbwt,
