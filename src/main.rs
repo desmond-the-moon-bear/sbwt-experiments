@@ -22,7 +22,8 @@ use sbwt::vodbg::pnsv::{
 
 fn main() {
     env_logger::init();
-    comparison();
+    // comparison();
+    analyse_range_lengths(2);
 }
 
 fn comparison() {
@@ -65,23 +66,36 @@ fn analyse_range_lengths(argument_start: usize) {
     let mut args = std::env::args().skip(argument_start);
     let lcs_path = args.next().expect("expected lcs index path");
 
-    println!("reading data...");
+    log::info!("reading data...");
     let mut lcs_reader = std::io::BufReader::new(std::fs::File::open(lcs_path).unwrap());
     let lcs = LcsArray::load(&mut lcs_reader).unwrap();
 
-    println!("count: {}", lcs.len());
+    let count = lcs.len();
+    let two_percent = count / 50;
+    let mut bound = two_percent;
+    let mut progress = 0;
+    log::info!("count: {}", count);
 
     let k: usize = 31;
     let mut range_counts = vec![1_usize; k];
+    let mut previous_position = vec![0_usize; k];
+    let mut max_range = vec![0_usize; k];
 
-    println!("counting...");
+    log::info!("counting...");
     for i in 1..lcs.len() {
         let item = lcs.access(i);
         #[allow(clippy::needless_range_loop)]
         for target_length in 1..k {
             if item < target_length {
                 range_counts[target_length] += 1;
+                max_range[target_length] = max_range[target_length].max(i - previous_position[target_length]);
+                previous_position[target_length] = i;
             }
+        }
+        if i > bound {
+            bound += two_percent;
+            progress += 2;
+            log::info!("scanning... {}%", progress);
         }
     }
 
@@ -93,7 +107,13 @@ fn analyse_range_lengths(argument_start: usize) {
         average_length = lcs.len() as f64 / range_counts[target_length] as f64;
         ratio = previous_average_length / average_length;
         previous_average_length = average_length;
-        println!("tl: {} | avg: {:.3} | ratio: {:.3}", target_length, average_length, ratio);
+        log::info!(
+            "tl: {} | avg: {:.3} | ratio: {:.3} | ml: {}",
+            target_length,
+            average_length,
+            ratio,
+            max_range[target_length]
+        );
     }
 }
 
