@@ -15,6 +15,7 @@ use sbwt::vodbg::pnsv::{
     PnsvDynOwned,
     PnsvMatrix,
     PnsvMatrixSux,
+    PnsvTuned,
     Ranges,
     WWT,
 };
@@ -34,12 +35,15 @@ fn comparison() {
     // println!("creating standard bp structure...");
     // let bp = LcsPnsvBp::new(&lcs, 2048);
 
-    let pnsv_dyn = pnsv::pnsv_matrix_simd(&sbwt, &lcs);
+    // let pnsv_dyn = pnsv::pnsv_matrix_simd(&sbwt, &lcs);
+    // let pnsv_tuned = PnsvTuned::new_with_default_values(&sbwt, &lcs);
+    let pnsv_tuned = PnsvTuned::new(&sbwt, &lcs, 8, 2);
     drop(lcs);
 
     let pnsv_dyn_index = StreamingIndex {
         extend_right: &sbwt,
-        contract_left: &pnsv_dyn,
+        // contract_left: &pnsv_dyn,
+        contract_left: &pnsv_tuned,
         // contract_left: &bp,
         n: sbwt.n_sets(),
         k: sbwt.k(),
@@ -48,7 +52,7 @@ fn comparison() {
     println!("running benchmarks...");
 
     let lower = 1;
-    let upper = 31;
+    let upper = 21;
 
     for bound in lower..upper {
         print!("dyn,{},", bound);
