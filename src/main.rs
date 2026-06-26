@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use sbwt::{ContractLeft, ExtendRight, StreamingIndex};
+use sbwt::{ContractLeft, ExtendRight, SbwtIndex, StreamingIndex, SubsetMatrix};
 use sbwt::SbwtIndexVariant;
 use sbwt::LcsArray;
 
@@ -24,42 +24,41 @@ use sbwt::vodbg::pnsv::{
 
 fn main() {
     env_logger::init();
-    comparison();
+    ms_benchmark();
 }
 
-fn comparison() {
-    println!("loading data...");
-    let (index, lcs) = read_index_and_lcs(1);
+fn ms_benchmark() {
+    let pnsv_type = std::env::args().nth(1).expect("expected pnsv type");
+    log::info!("loading data: {}", std::env::args().nth(2).expect("expected sbwt path"));
+    let (index, lcs) = read_index_and_lcs(2);
     let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
-    println!("lcs.len: {}", lcs.len());
-    let queries = read_query(3);
+    log::info!("count: {}", lcs.len());
+    let queries = read_query(4);
 
-    // println!("creating standard bp structure...");
-    // let bp = LcsPnsvBp::new(&lcs, 2048);
+    if pnsv_type == "safe" {
+        let pnsv = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
+        drop(lcs);
+        log::info!("running PnsvSafe benchmark...");
+        run_ms_benchmark(&sbwt, &queries, &pnsv);
+    } else {
+        let pnsv = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
+        drop(lcs);
+        log::info!("running PnsvTuned benchmark...");
+        run_ms_benchmark(&sbwt, &queries, &pnsv);
+    };
+}
 
-    // let pnsv_dyn = pnsv::pnsv_wwt_simd(&sbwt, &lcs, sbwt.k());
-    let pnsv_safe = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
-    // let pnsv_tuned = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
-    // let pnsv_tuned = PnsvTuned::new(&sbwt, &lcs, sbwt.k(), 8, 2);
-    drop(lcs);
-
-    let pnsv_dyn_index = StreamingIndex {
-        extend_right: &sbwt,
-        contract_left: &pnsv_safe,
-        // contract_left: &pnsv_tuned,
-        // contract_left: &bp,
+fn run_ms_benchmark(sbwt: &SbwtIndex<SubsetMatrix>, queries: &[Vec<u8>], pnsv: &impl Pnsv) {
+    let index = StreamingIndex {
+        extend_right: sbwt,
+        contract_left: pnsv,
         n: sbwt.n_sets(),
         k: sbwt.k(),
     };
 
-    println!("running benchmarks...");
-
-    let lower = 1;
-    let upper = 31;
-
-    for bound in lower..upper {
+    for bound in 1..=31 {
         print!("{},", bound);
-        benchmark_bms_separate_queries(&pnsv_dyn_index, &queries, bound);
+        benchmark_bms_separate_queries(&index, queries, bound);
         println!();
     }
 }
