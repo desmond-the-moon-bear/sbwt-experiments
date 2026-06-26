@@ -6,6 +6,7 @@ use sbwt::LcsArray;
 
 use sbwt::vodbg::{pnsv::Pnsv, benchmark::*};
 
+use sbwt::vodbg::*;
 use sbwt::vodbg::pnsv::{
     self,
     ABS,
@@ -15,6 +16,7 @@ use sbwt::vodbg::pnsv::{
     PnsvDynOwned,
     PnsvMatrix,
     PnsvMatrixSux,
+    PnsvSafe,
     PnsvTuned,
     Ranges,
     WWT,
@@ -22,8 +24,7 @@ use sbwt::vodbg::pnsv::{
 
 fn main() {
     env_logger::init();
-    // comparison();
-    analyse_range_lengths(2);
+    comparison();
 }
 
 fn comparison() {
@@ -36,15 +37,16 @@ fn comparison() {
     // println!("creating standard bp structure...");
     // let bp = LcsPnsvBp::new(&lcs, 2048);
 
-    // let pnsv_dyn = pnsv::pnsv_matrix_simd(&sbwt, &lcs);
-    // let pnsv_tuned = PnsvTuned::new_with_default_values(&sbwt, &lcs);
-    let pnsv_tuned = PnsvTuned::new(&sbwt, &lcs, 8, 2);
+    // let pnsv_dyn = pnsv::pnsv_wwt_simd(&sbwt, &lcs, sbwt.k());
+    let pnsv_safe = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
+    // let pnsv_tuned = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
+    // let pnsv_tuned = PnsvTuned::new(&sbwt, &lcs, sbwt.k(), 8, 2);
     drop(lcs);
 
     let pnsv_dyn_index = StreamingIndex {
         extend_right: &sbwt,
-        // contract_left: &pnsv_dyn,
-        contract_left: &pnsv_tuned,
+        contract_left: &pnsv_safe,
+        // contract_left: &pnsv_tuned,
         // contract_left: &bp,
         n: sbwt.n_sets(),
         k: sbwt.k(),
@@ -53,10 +55,10 @@ fn comparison() {
     println!("running benchmarks...");
 
     let lower = 1;
-    let upper = 21;
+    let upper = 31;
 
     for bound in lower..upper {
-        print!("dyn,{},", bound);
+        print!("{},", bound);
         benchmark_bms_separate_queries(&pnsv_dyn_index, &queries, bound);
         println!();
     }

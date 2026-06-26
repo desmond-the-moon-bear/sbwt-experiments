@@ -1830,6 +1830,7 @@ dependencies = [
  "sux",
  "test-log",
  "unitig_flipper",
+ "value-traits",
  "wide",
 ]
 
