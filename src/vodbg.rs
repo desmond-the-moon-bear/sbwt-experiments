@@ -1,12 +1,11 @@
 use super::*;
 
-pub fn operation_benchmark() {
-    let pnsv_type = std::env::args().nth(1).expect("expected pnsv type");
-    log::info!("loading data: {}", std::env::args().nth(2).expect("expected sbwt path"));
-    let (index, lcs) = read_index_and_lcs(2);
+pub fn operation_benchmark(args: &mut std::env::Args) {
+    let index = load_index(args);
     let SbwtIndexVariant::SubsetMatrix(mut sbwt) = index;
+    let lcs = load_lcs(args);
     log::info!("count: {}", lcs.len());
-    let mut queries = read_query(4);
+    let mut queries = load_query(args);
     let query = queries.swap_remove(0);
 
     sbwt.build_select();

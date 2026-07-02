@@ -55,10 +55,11 @@ pub fn analyse_range_lengths(argument_start: usize) {
     }
 }
 
-pub fn simd_scan_compare() {
-    let (index, lcs) = read_index_and_lcs(1);
+pub fn simd_scan_compare(args: &mut std::env::Args) {
+    let index = load_index(args);
     let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
-    let queries = read_query(3);
+    let lcs = load_lcs(args);
+    let queries = load_query(args);
 
     let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
     let lcs_simd = LcsSimd::from_iterator(iterator, lcs.len());
@@ -159,9 +160,10 @@ pub fn statistics_pnsv_matrix(matrix: &PnsvMatrix, target_length: usize) -> (f64
     (nanos_per_previous, nanos_per_next)
 }
 
-pub fn simd_bounded_scan_time() {
-    let (index, lcs) = read_index_and_lcs(1);
+pub fn simd_bounded_scan_time(args: &mut std::env::Args) {
+    let index = load_index(args);
     let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
+    let lcs = load_lcs(args);
 
     let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
 
@@ -259,9 +261,10 @@ pub fn statistics_augmented_bounded_scan(abs: &ABS, target_length: usize) -> (f6
     (nanos_per_next, nanos_per_previous)
 }
 
-pub fn simd_bounded_scan_with_fallback_time() {
-    let (index, lcs) = read_index_and_lcs(1);
+pub fn simd_bounded_scan_with_fallback_time(args: &mut std::env::Args) {
+    let index = load_index(args);
     let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
+    let lcs = load_lcs(args);
 
     let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
 

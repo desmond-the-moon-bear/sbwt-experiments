@@ -3,18 +3,20 @@
 mod statistics;
 mod vodbg;
 
-use sbwt::{ContractLeft, ExtendRight, SbwtIndex, StreamingIndex, SubsetMatrix};
-use sbwt::SbwtIndexVariant;
+use std::io::Read;
+
 use sbwt::LcsArray;
-
-use sbwt::vodbg::{pnsv::Pnsv, benchmark::*};
-
+use sbwt::SbwtIndexVariant;
+use sbwt::{BitPackedKmerSortingMem, ContractLeft, ExtendRight, SbwtIndex, SbwtIndexBuilder, StreamingIndex, SubsetMatrix};
 use sbwt::vodbg::*;
+use sbwt::vodbg::benchmark::benchmark_bms_separate_queries;
+use sbwt::vodbg::count::Counts;
 use sbwt::vodbg::pnsv::{
     self,
     ABS,
     LcsPnsvBp,
     LcsSimd,
+    Pnsv,
     PnsvDyn,
     PnsvDynOwned,
     PnsvMatrix,
@@ -25,30 +27,59 @@ use sbwt::vodbg::pnsv::{
     WWT,
 };
 
+const ROOT_HELP: &str = r"possible actions:
+    ms <-load_safe | -safe | -tuned> <SBWT_PATH> <QUERY_PATH> <PNSV_PATH | LCS_PATH>
+        * matching statistics benchmark; a PNSV_PATH is expected when the first flag has prefix -load,
+          otherwise, the pnsv structure will be built from the lcs read from the LCS_PATH
+    ser_safe <SBWT_PATH> <LCS_PATH> [OUTPUT_PATH]
+        * create and serialize a PnsvSafe structure to the file at the given path; the default for
+          OUTPUT_PATH is ./unknown.pnsv_safe
+";
+
 fn main() {
     env_logger::init();
-    vodbg::operation_benchmark();
+    let mut args = std::env::args();
+    args.next().unwrap();
+    let action = args.next().unwrap_or("".to_string());
+
+    match action.as_str() {
+        "ms" => { ms_benchmark(&mut args); }
+        "ser_safe" => { serialize_pnsv_safe(&mut args); },
+        _ => {
+            println!("{}", ROOT_HELP);
+        }
+    };
 }
 
-fn ms_benchmark() {
-    let pnsv_type = std::env::args().nth(1).expect("expected pnsv type");
-    log::info!("loading data: {}", std::env::args().nth(2).expect("expected sbwt path"));
-    let (index, lcs) = read_index_and_lcs(2);
+fn ms_benchmark(args: &mut std::env::Args) {
+    let flag = args.next().expect("expected pnsv type");
+    let index = load_index(args);
     let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
-    log::info!("count: {}", lcs.len());
-    let queries = read_query(4);
+    log::info!("count: {}", sbwt.n_sets());
+    let queries = load_query(args);
 
-    if pnsv_type == "safe" {
-        let pnsv = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
-        drop(lcs);
+    if flag == "-load_safe" {
+        let pnsv = load_pnsv_safe(&sbwt, sbwt.n_sets(), sbwt.k(), args).unwrap();
         log::info!("running PnsvSafe benchmark...");
         run_ms_benchmark(&sbwt, &queries, &pnsv);
-    } else {
-        let pnsv = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
-        drop(lcs);
-        log::info!("running PnsvTuned benchmark...");
-        run_ms_benchmark(&sbwt, &queries, &pnsv);
-    };
+        return;
+    }
+
+    let lcs = load_lcs(args);
+    match flag.as_str() {
+        "-safe" => {
+            let pnsv = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
+            drop(lcs);
+            log::info!("running PnsvSafe benchmark...");
+            run_ms_benchmark(&sbwt, &queries, &pnsv);
+        },
+        _ => {
+            let pnsv = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
+            drop(lcs);
+            log::info!("running PnsvTuned benchmark...");
+            run_ms_benchmark(&sbwt, &queries, &pnsv);
+        }
+    }
 }
 
 fn run_ms_benchmark(sbwt: &SbwtIndex<SubsetMatrix>, queries: &[Vec<u8>], pnsv: &impl Pnsv) {
@@ -66,6 +97,52 @@ fn run_ms_benchmark(sbwt: &SbwtIndex<SubsetMatrix>, queries: &[Vec<u8>], pnsv: &
     }
 }
 
+fn load_query(args: &mut std::env::Args) -> Vec<Vec<u8>> {
+    use sbwt::SeqStream;
+    let path = args.next().expect("expected query path");
+    let file = std::fs::File::open(path).unwrap();
+    let reader = std::io::BufReader::new(file);
+    sbwt::vodbg::benchmark::read_sequences(reader)
+}
+
+fn load_index(args: &mut std::env::Args) -> SbwtIndexVariant {
+    let path = args.next().expect("expected sbwt index path");
+    log::info!("loading sbwt index: {}", path);
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path).unwrap());
+    sbwt::load_sbwt_index_variant(&mut reader).unwrap()
+}
+
+fn load_lcs(args: &mut std::env::Args) -> LcsArray {
+    let path = args.next().expect("expected sbwt index path");
+    log::info!("loading lcs array: {}", path);
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path).unwrap());
+    LcsArray::load(&mut reader).unwrap()
+}
+
+fn serialize_pnsv_safe(args: &mut std::env::Args) -> std::io::Result<()> {
+    let index = load_index(args);
+    let SbwtIndexVariant::SubsetMatrix(sbwt) = index;
+    let lcs = load_lcs(args);
+
+    let path = match args.next() {
+        Some(value) => value,
+        None => "./unknown.pnsv_safe".to_string()
+    };
+
+    let file = std::fs::File::create_new(path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    let pnsv_safe = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
+    pnsv_safe.serialize(&mut writer)
+}
+
+fn load_pnsv_safe(extend: &impl ExtendRight, count: usize, max_k: usize, args: &mut std::env::Args) -> std::io::Result<PnsvSafe> {
+    log::info!("[load_pnsv_safe] creating ranges...");
+    let path = args.next().expect("expected pnsv_safe path");
+    let file = std::fs::File::open(path)?;
+    let mut reader = std::io::BufReader::new(file);
+    PnsvSafe::load(&mut reader, extend, count, max_k)
+}
+
 fn correctness(n: usize, first: &impl Pnsv, second: &impl Pnsv, target_length_lower: usize, target_length_upper: usize) {
     let ten_percent = n / 10;
     for i in 0..n {
@@ -80,5 +157,37 @@ fn correctness(n: usize, first: &impl Pnsv, second: &impl Pnsv, target_length_lo
         if i % ten_percent == ten_percent - 1 {
             println!("{}0%", 1 + i / ten_percent);
         }
+    }
+}
+
+fn sbwt_count_investigation() {
+    let max_k = 4;
+    let mut seqs: Vec<Vec<u8>> = vec![
+        b"ACGTACG".to_vec()
+    ];
+
+    let (sbwt, lcs) = SbwtIndexBuilder::<BitPackedKmerSortingMem>::new()
+        .k(max_k).build_lcs(true)
+        .add_all_dummy_paths(true)
+        .build_select_support(true)
+        .run_from_vecs(&seqs);
+    let lcs = lcs.unwrap();
+    let pnsv_tuned = PnsvTuned::new_with_default_values(&sbwt, &lcs, max_k);
+    let sequence_stream = sbwt::VecSeqStream::new(&seqs);
+    let streaming_index = StreamingIndex {
+        extend_right: &sbwt,
+        contract_left: &pnsv_tuned,
+        n: sbwt.n_sets(),
+        k: sbwt.k()
+    };
+
+    let vodbg = VoDbg::new(&sbwt, &pnsv_tuned);
+    let counts = Counts::try_new_with_default_values(sequence_stream, streaming_index, &vodbg).unwrap();
+
+    for i in 0..sbwt.n_sets() {
+        let node = sbwt::vodbg::new_node(i, i + 1, sbwt.k());
+        let kmer = vodbg.get_kmer(node);
+        let kmer_str = str::from_utf8(&kmer).unwrap();
+        println!("{} {} {}", i, kmer_str, counts.individual_counts[i]);
     }
 }
