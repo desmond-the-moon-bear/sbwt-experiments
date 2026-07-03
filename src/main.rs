@@ -27,8 +27,8 @@ use sbwt::vodbg::pnsv::{
     WWT,
 };
 
-const ROOT_HELP: &str = r"possible actions:
-    ms <-load_safe | -safe | -tuned> <SBWT_PATH> <QUERY_PATH> <PNSV_PATH | LCS_PATH>
+const HELP: &str = r"possible actions:
+    ms <-load_safe | -safe | -tuned> <SBWT_PATH> <QUERY_PATH> <PNSV_PATH | LCS_PATH> [SCAN_BOUND]
         * matching statistics benchmark; a PNSV_PATH is expected when the first flag has prefix -load,
           otherwise, the pnsv structure will be built from the lcs read from the LCS_PATH
     ser_safe <SBWT_PATH> <LCS_PATH> [OUTPUT_PATH]
@@ -46,7 +46,7 @@ fn main() {
         "ms" => { ms_benchmark(&mut args); }
         "ser_safe" => { serialize_pnsv_safe(&mut args); },
         _ => {
-            println!("{}", ROOT_HELP);
+            println!("{}", HELP);
         }
     };
 }
@@ -59,7 +59,9 @@ fn ms_benchmark(args: &mut std::env::Args) {
     let queries = load_query(args);
 
     if flag == "-load_safe" {
-        let pnsv = load_pnsv_safe(&sbwt, sbwt.n_sets(), sbwt.k(), args).unwrap();
+        let mut pnsv = load_pnsv_safe(&sbwt, sbwt.n_sets(), sbwt.k(), args).unwrap();
+        let scan_bound = parse_scan_bound_for_pnsv_safe(args);
+        pnsv.scan_bound = scan_bound;
         log::info!("running PnsvSafe benchmark...");
         run_ms_benchmark(&sbwt, &queries, &pnsv);
         return;
@@ -68,7 +70,8 @@ fn ms_benchmark(args: &mut std::env::Args) {
     let lcs = load_lcs(args);
     match flag.as_str() {
         "-safe" => {
-            let pnsv = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
+            let scan_bound = parse_scan_bound_for_pnsv_safe(args);
+            let pnsv = PnsvSafe::new(&sbwt, &lcs, sbwt.k(), scan_bound);
             drop(lcs);
             log::info!("running PnsvSafe benchmark...");
             run_ms_benchmark(&sbwt, &queries, &pnsv);
@@ -79,6 +82,17 @@ fn ms_benchmark(args: &mut std::env::Args) {
             log::info!("running PnsvTuned benchmark...");
             run_ms_benchmark(&sbwt, &queries, &pnsv);
         }
+    }
+}
+
+fn parse_scan_bound_for_pnsv_safe(args: &mut std::env::Args) -> usize {
+    if let Some(scan_bound_arg) = args.next() {
+        match scan_bound_arg.parse::<usize>() {
+            Ok(value) => value.max(PnsvSafe::DEFAULT_SCAN_BOUND),
+            Err(_) => PnsvSafe::DEFAULT_SCAN_BOUND
+        }
+    } else {
+        PnsvSafe::DEFAULT_SCAN_BOUND
     }
 }
 
