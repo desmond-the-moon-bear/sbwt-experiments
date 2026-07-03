@@ -60,7 +60,7 @@ fn ms_benchmark(args: &mut std::env::Args) {
 
     if flag == "-load_safe" {
         let mut pnsv = load_pnsv_safe(&sbwt, sbwt.n_sets(), sbwt.k(), args).unwrap();
-        let scan_bound = parse_scan_bound_for_pnsv_safe(args);
+        let scan_bound = parse_scan_bound(args);
         pnsv.scan_bound = scan_bound;
         log::info!("running PnsvSafe benchmark...");
         run_ms_benchmark(&sbwt, &queries, &pnsv);
@@ -68,16 +68,16 @@ fn ms_benchmark(args: &mut std::env::Args) {
     }
 
     let lcs = load_lcs(args);
+    let scan_bound = parse_scan_bound(args);
     match flag.as_str() {
         "-safe" => {
-            let scan_bound = parse_scan_bound_for_pnsv_safe(args);
             let pnsv = PnsvSafe::new(&sbwt, &lcs, sbwt.k(), scan_bound);
             drop(lcs);
             log::info!("running PnsvSafe benchmark...");
             run_ms_benchmark(&sbwt, &queries, &pnsv);
         },
         _ => {
-            let pnsv = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
+            let pnsv = PnsvTuned::new(&sbwt, &lcs, sbwt.k(), scan_bound, PnsvTuned::DEFAULT_FALLBACK_OVERLAP);
             drop(lcs);
             log::info!("running PnsvTuned benchmark...");
             run_ms_benchmark(&sbwt, &queries, &pnsv);
@@ -85,7 +85,7 @@ fn ms_benchmark(args: &mut std::env::Args) {
     }
 }
 
-fn parse_scan_bound_for_pnsv_safe(args: &mut std::env::Args) -> usize {
+fn parse_scan_bound(args: &mut std::env::Args) -> usize {
     if let Some(scan_bound_arg) = args.next() {
         match scan_bound_arg.parse::<usize>() {
             Ok(value) => value.max(PnsvSafe::DEFAULT_SCAN_BOUND),
