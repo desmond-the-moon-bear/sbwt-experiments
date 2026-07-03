@@ -34,6 +34,7 @@ const HELP: &str = r"possible actions:
     ser_safe <SBWT_PATH> <LCS_PATH> [OUTPUT_PATH]
         * create and serialize a PnsvSafe structure to the file at the given path; the default for
           OUTPUT_PATH is ./unknown.pnsv_safe
+    count <SBWT_PATH> <LCS_PATH> <FILE_LIST_PATH>
 ";
 
 fn main() {
@@ -45,6 +46,7 @@ fn main() {
     match action.as_str() {
         "ms" => { ms_benchmark(&mut args); }
         "ser_safe" => { serialize_pnsv_safe(&mut args); },
+        "count" => { count(&mut args); },
         _ => {
             println!("{}", HELP);
         }
@@ -156,6 +158,94 @@ fn load_pnsv_safe(extend: &impl ExtendRight, count: usize, max_k: usize, args: &
     let mut reader = std::io::BufReader::new(file);
     PnsvSafe::load(&mut reader, extend, count, max_k)
 }
+
+fn count(args: &mut std::env::Args) {
+    let index = load_index(args);
+    let SbwtIndexVariant::SubsetMatrix(mut sbwt) = index;
+    let lcs = load_lcs(args);
+    let pnsv = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
+    drop(lcs);
+    sbwt.build_select();
+    let streaming_index = StreamingIndex {
+        extend_right: &sbwt,
+        contract_left: &pnsv,
+        n: sbwt.n_sets(),
+        k: sbwt.k(),
+    };
+    let vodbg = sbwt::vodbg::VoDbg::new(&sbwt, &pnsv);
+    log::info!("so far so good...");
+    let files = read_lines(&PathBuf::from(args.next().expect("expected file list path")));
+    let sequence_stream = MyMultiFileSeqReader::new(files);
+    let counts = sbwt::vodbg::count::Counts::try_new_with_default_values(sequence_stream, streaming_index, &vodbg);
+    log::info!("result is ok? {}", counts.is_some());
+    if let Some(counts) = counts {
+        log::info!("number of elements whose count is > u8::MAX: {}", counts.large_counts.len());
+    }
+}
+
+// ==================================================================== {
+// ====================================================================
+// ==================================================================== stolen from sbwt-cli
+use jseqio::reader::*;
+use std::path::PathBuf;
+
+fn read_lines(path: &PathBuf) -> Vec<PathBuf> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(path).unwrap();
+    let reader = std::io::BufReader::new(file);
+    let mut paths = Vec::<PathBuf>::new();
+    for line in reader.lines() {
+        let line = line.unwrap();
+        paths.push(PathBuf::from(line));
+    }
+    paths
+}
+
+struct MyMultiFileSeqReader {
+    paths: Vec<PathBuf>,
+    next_idx: usize,
+    current: Option<jseqio::reader::DynamicFastXReader>,
+    local_buf: Vec<u8>,
+}
+
+impl MyMultiFileSeqReader {
+    fn new(paths: Vec<PathBuf>) -> Self {
+        Self {
+            paths,
+            next_idx: 0,
+            current: None,
+            local_buf: vec![]
+        }
+    }
+}
+
+impl sbwt::SeqStream for MyMultiFileSeqReader {
+    fn stream_next(&mut self) -> Option<&[u8]> {
+        loop {
+            if let Some(current) = &mut self.current {
+                if let Some(rec) = current.read_next().unwrap() {
+                    self.local_buf.clear();
+                    self.local_buf.extend_from_slice(rec.seq);
+                    return Some(&self.local_buf);
+                } else {
+                    self.current = None;
+                }
+            }
+
+            // Open next file if available
+            if self.next_idx < self.paths.len() {
+                let path = &self.paths[self.next_idx];
+                self.next_idx += 1;
+                self.current = Some(jseqio::reader::DynamicFastXReader::from_file(path).unwrap());
+            } else {
+                return None;
+            }
+        }
+    }
+}
+// ==================================================================== stolen from sbwt-cli
+// ====================================================================
+// ==================================================================== }
 
 fn correctness(n: usize, first: &impl Pnsv, second: &impl Pnsv, target_length_lower: usize, target_length_upper: usize) {
     let ten_percent = n / 10;
