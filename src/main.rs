@@ -180,6 +180,14 @@ fn count(args: &mut std::env::Args) {
     log::info!("result is ok? {}", counts.is_some());
     if let Some(counts) = counts {
         log::info!("number of elements whose count is > u8::MAX: {}", counts.large_counts.len());
+
+        use std::io::Write;
+        let stats_file = std::fs::File::create("../stats.txt").unwrap();
+        let mut stats_writer = std::io::BufWriter::new(stats_file);
+        for count in counts.iter() {
+            writeln!(&mut stats_writer, "{}", count).unwrap();
+        }
+        drop(stats_writer);
     }
 }
 
