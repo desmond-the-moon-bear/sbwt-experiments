@@ -17,10 +17,8 @@ use sbwt::vodbg::pnsv::{
     LcsPnsvBp,
     LcsSimd,
     Pnsv,
-    PnsvDyn,
     PnsvDynOwned,
     PnsvMatrix,
-    PnsvMatrixSux,
     PnsvSafe,
     PnsvTuned,
     Ranges,
@@ -61,7 +59,7 @@ fn ms_benchmark(args: &mut std::env::Args) {
     let queries = load_query(args);
 
     if flag == "-load_safe" {
-        let mut pnsv = load_pnsv_safe(&sbwt, sbwt.n_sets(), sbwt.k(), args).unwrap();
+        let mut pnsv = load_pnsv_safe(args).unwrap();
         let scan_bound = parse_scan_bound(args);
         pnsv.scan_bound = scan_bound;
         log::info!("running PnsvSafe benchmark...");
@@ -148,15 +146,16 @@ fn serialize_pnsv_safe(args: &mut std::env::Args) -> std::io::Result<()> {
     let file = std::fs::File::create_new(path)?;
     let mut writer = std::io::BufWriter::new(file);
     let pnsv_safe = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
-    pnsv_safe.serialize(&mut writer)
+    pnsv_safe.serialize(&mut writer)?;
+    Ok(())
 }
 
-fn load_pnsv_safe(extend: &impl ExtendRight, count: usize, max_k: usize, args: &mut std::env::Args) -> std::io::Result<PnsvSafe> {
+fn load_pnsv_safe(args: &mut std::env::Args) -> std::io::Result<PnsvSafe> {
     log::info!("[load_pnsv_safe] creating ranges...");
     let path = args.next().expect("expected pnsv_safe path");
     let file = std::fs::File::open(path)?;
     let mut reader = std::io::BufReader::new(file);
-    PnsvSafe::load(&mut reader, extend, count, max_k)
+    PnsvSafe::load(&mut reader)
 }
 
 fn count(args: &mut std::env::Args) {
