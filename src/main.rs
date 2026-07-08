@@ -175,7 +175,15 @@ fn count(args: &mut std::env::Args) {
     log::info!("so far so good...");
     let files = read_lines(&PathBuf::from(args.next().expect("expected file list path")));
     let sequence_stream = MyMultiFileSeqReader::new(files);
-    let counts = sbwt::vodbg::count::Counts::try_new_with_default_values(sequence_stream, streaming_index, &vodbg);
+    let counts = sbwt::vodbg::count::Counts::try_new_concurrent(
+        sequence_stream,
+        &streaming_index,
+        &vodbg,
+        Counts::DEFAULT_SAMPLE_DISTANCE,
+        4,
+        8,
+        Counts::DEFAULT_BATCH_SIZE_IN_BYTES
+    );
     log::info!("result is ok? {}", counts.is_some());
     if let Some(counts) = counts {
         log::info!("number of elements whose count is > u8::MAX: {}", counts.large_counts.len());
@@ -293,7 +301,7 @@ fn sbwt_count_investigation() {
     };
 
     let vodbg = VoDbg::new(&sbwt, &pnsv_tuned);
-    let counts = Counts::try_new_with_default_values(sequence_stream, streaming_index, &vodbg).unwrap();
+    let counts = Counts::try_new_default(sequence_stream, streaming_index, &vodbg).unwrap();
 
     for i in 0..sbwt.n_sets() {
         let node = sbwt::vodbg::new_node(i, i + 1, sbwt.k());
