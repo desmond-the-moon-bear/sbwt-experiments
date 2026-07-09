@@ -7,6 +7,7 @@ use std::io::Read;
 
 use sbwt::LcsArray;
 use sbwt::SbwtIndexVariant;
+use sbwt::SeqStream;
 use sbwt::{BitPackedKmerSortingMem, ContractLeft, ExtendRight, SbwtIndex, SbwtIndexBuilder, StreamingIndex, SubsetMatrix};
 use sbwt::vodbg::*;
 use sbwt::vodbg::benchmark::benchmark_bms_separate_queries;
@@ -32,7 +33,8 @@ const HELP: &str = r"possible actions:
     ser_safe <SBWT_PATH> <LCS_PATH> [OUTPUT_PATH]
         * create and serialize a PnsvSafe structure to the file at the given path; the default for
           OUTPUT_PATH is ./unknown.pnsv_safe
-    count <hash | two> <SBWT_PATH> <LCS_PATH> <FILE_LIST_PATH>
+    count <hash | two> <SBWT_PATH> <LCS_PATH> <FILE_LIST_PATH> <AUXILIARY_MEMORY_GB> <THREADS>
+    input_ms <SBWT_PATH> <LCS_PATH> <FILE_LIST_PATH>
 ";
 
 fn main() {
@@ -42,9 +44,10 @@ fn main() {
     let action = args.next().unwrap_or("".to_string());
 
     match action.as_str() {
-        "ms" => { ms_benchmark(&mut args); }
-        "ser_safe" => { serialize_pnsv_safe(&mut args); },
-        "count" => { count(&mut args); },
+        "ms"       => { ms_benchmark        (&mut args); }
+        "ser_safe" => { serialize_pnsv_safe (&mut args); },
+        "count"    => { count               (&mut args); },
+        "input_ms" => { matching_statistics (&mut args); },
         _ => {
             println!("{}", HELP);
         }
@@ -163,7 +166,7 @@ fn count(args: &mut std::env::Args) {
     let index = load_index(args);
     let SbwtIndexVariant::SubsetMatrix(mut sbwt) = index;
     let lcs = load_lcs(args);
-    let pnsv = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
+    let pnsv = PnsvTuned::new(&sbwt, &lcs, sbwt.k(), 64, 6);
     drop(lcs);
     sbwt.build_select();
     let streaming_index = StreamingIndex {
@@ -176,6 +179,10 @@ fn count(args: &mut std::env::Args) {
     log::info!("so far so good...");
     let files = read_lines(&PathBuf::from(args.next().expect("expected file list path")));
     let sequence_stream = MyMultiFileSeqReader::new(&files);
+
+    let auxiliary_memory_gb = args.next().expect("expected auxiliary memory in gb").parse::<usize>().expect("expected a number");
+    let threads = args.next().expect("expected thread count").parse::<usize>().expect("expected a number");
+
     let start = std::time::Instant::now();
     let counts = if count_type == "hash" {
         sbwt::vodbg::count::Counts::try_new_concurrent_with_hashmap(
@@ -183,8 +190,8 @@ fn count(args: &mut std::env::Args) {
             &streaming_index,
             &vodbg,
             Counts::DEFAULT_SAMPLE_DISTANCE,
-            2,
-            7,
+            auxiliary_memory_gb,
+            threads,
             Counts::DEFAULT_BATCH_SIZE_IN_BYTES
         )
     } else {
@@ -193,13 +200,13 @@ fn count(args: &mut std::env::Args) {
             &streaming_index,
             &vodbg,
             Counts::DEFAULT_SAMPLE_DISTANCE,
-            2,
-            7,
+            auxiliary_memory_gb,
+            threads,
             Counts::DEFAULT_BATCH_SIZE_IN_BYTES
         )
     };
     let end = std::time::Instant::now();
-    log::info!("time: {:.3}", (end - start).as_secs_f64());
+    log::info!("time: {:.3}", (end - start).as_secs_f64() / 60.0);
     log::info!("result is ok? {}", counts.is_some());
     if let Some(counts) = counts {
         log::info!("number of elements whose count is > u8::MAX: {}", counts.large_counts.len());
@@ -212,6 +219,43 @@ fn count(args: &mut std::env::Args) {
         // }
         // drop(stats_writer);
     }
+}
+
+fn matching_statistics(args: &mut std::env::Args) {
+    let index = load_index(args);
+    let SbwtIndexVariant::SubsetMatrix(mut sbwt) = index;
+    let lcs = load_lcs(args);
+    let pnsv = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
+    drop(lcs);
+    sbwt.build_select();
+    let streaming_index = StreamingIndex {
+        extend_right: &sbwt,
+        contract_left: &pnsv,
+        n: sbwt.n_sets(),
+        k: sbwt.k(),
+    };
+    let start = std::time::Instant::now();
+    let files = read_lines(&PathBuf::from(args.next().expect("expected file list path")));
+    let mut sequence_stream = MyMultiFileSeqReader::new(&files);
+    let mut checksum = 0;
+
+    let step = 25000;
+    let mut bound = step;
+    let mut index = 0;
+
+    while let Some(sequence) = sequence_stream.stream_next() {
+        for statistic in streaming_index.matching_statistics(sequence) {
+            checksum += statistic.0;
+        }
+        index += 1;
+        if index >= bound {
+            log::info!("processed sequences: {}", index);
+            bound += step;
+        }
+    }
+    log::info!("processed sequences: {}", index);
+    let end = std::time::Instant::now();
+    log::info!("time: {:.3}", (end - start).as_secs_f64() / 60.0);
 }
 
 // ==================================================================== {
