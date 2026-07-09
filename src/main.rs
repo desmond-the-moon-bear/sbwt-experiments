@@ -32,7 +32,7 @@ const HELP: &str = r"possible actions:
     ser_safe <SBWT_PATH> <LCS_PATH> [OUTPUT_PATH]
         * create and serialize a PnsvSafe structure to the file at the given path; the default for
           OUTPUT_PATH is ./unknown.pnsv_safe
-    count <SBWT_PATH> <LCS_PATH> <FILE_LIST_PATH>
+    count <hash | two> <SBWT_PATH> <LCS_PATH> <FILE_LIST_PATH>
 ";
 
 fn main() {
@@ -159,6 +159,7 @@ fn load_pnsv_safe(args: &mut std::env::Args) -> std::io::Result<PnsvSafe> {
 }
 
 fn count(args: &mut std::env::Args) {
+    let count_type = args.next().expect("expected count type");
     let index = load_index(args);
     let SbwtIndexVariant::SubsetMatrix(mut sbwt) = index;
     let lcs = load_lcs(args);
@@ -174,27 +175,42 @@ fn count(args: &mut std::env::Args) {
     let vodbg = sbwt::vodbg::VoDbg::new(&sbwt, &pnsv);
     log::info!("so far so good...");
     let files = read_lines(&PathBuf::from(args.next().expect("expected file list path")));
-    let sequence_stream = MyMultiFileSeqReader::new(files);
-    let counts = sbwt::vodbg::count::Counts::try_new_concurrent(
-        sequence_stream,
-        &streaming_index,
-        &vodbg,
-        Counts::DEFAULT_SAMPLE_DISTANCE,
-        4,
-        8,
-        Counts::DEFAULT_BATCH_SIZE_IN_BYTES
-    );
+    let sequence_stream = MyMultiFileSeqReader::new(&files);
+    let start = std::time::Instant::now();
+    let counts = if count_type == "hash" {
+        sbwt::vodbg::count::Counts::try_new_concurrent_with_hashmap(
+            sequence_stream,
+            &streaming_index,
+            &vodbg,
+            Counts::DEFAULT_SAMPLE_DISTANCE,
+            2,
+            7,
+            Counts::DEFAULT_BATCH_SIZE_IN_BYTES
+        )
+    } else {
+        sbwt::vodbg::count::Counts::try_new_concurrent_two_passes(
+            sequence_stream,
+            &streaming_index,
+            &vodbg,
+            Counts::DEFAULT_SAMPLE_DISTANCE,
+            2,
+            7,
+            Counts::DEFAULT_BATCH_SIZE_IN_BYTES
+        )
+    };
+    let end = std::time::Instant::now();
+    log::info!("time: {:.3}", (end - start).as_secs_f64());
     log::info!("result is ok? {}", counts.is_some());
     if let Some(counts) = counts {
         log::info!("number of elements whose count is > u8::MAX: {}", counts.large_counts.len());
 
-        use std::io::Write;
-        let stats_file = std::fs::File::create("../stats.txt").unwrap();
-        let mut stats_writer = std::io::BufWriter::new(stats_file);
-        for count in counts.iter() {
-            writeln!(&mut stats_writer, "{}", count).unwrap();
-        }
-        drop(stats_writer);
+        // use std::io::Write;
+        // let stats_file = std::fs::File::create("../stats.txt").unwrap();
+        // let mut stats_writer = std::io::BufWriter::new(stats_file);
+        // for count in counts.iter() {
+        //     writeln!(&mut stats_writer, "{}", count).unwrap();
+        // }
+        // drop(stats_writer);
     }
 }
 
@@ -216,15 +232,15 @@ fn read_lines(path: &PathBuf) -> Vec<PathBuf> {
     paths
 }
 
-struct MyMultiFileSeqReader {
-    paths: Vec<PathBuf>,
+struct MyMultiFileSeqReader<'a> {
+    paths: &'a [PathBuf],
     next_idx: usize,
     current: Option<jseqio::reader::DynamicFastXReader>,
     local_buf: Vec<u8>,
 }
 
-impl MyMultiFileSeqReader {
-    fn new(paths: Vec<PathBuf>) -> Self {
+impl<'a> MyMultiFileSeqReader<'a> {
+    fn new(paths: &'a [PathBuf]) -> Self {
         Self {
             paths,
             next_idx: 0,
@@ -234,7 +250,7 @@ impl MyMultiFileSeqReader {
     }
 }
 
-impl sbwt::SeqStream for MyMultiFileSeqReader {
+impl sbwt::SeqStream for MyMultiFileSeqReader<'_> {
     fn stream_next(&mut self) -> Option<&[u8]> {
         loop {
             if let Some(current) = &mut self.current {
@@ -258,6 +274,13 @@ impl sbwt::SeqStream for MyMultiFileSeqReader {
         }
     }
 }
+
+impl<'a> Clone for MyMultiFileSeqReader<'a> {
+    fn clone(&self) -> Self {
+        Self { paths: self.paths, next_idx: 0, current: None, local_buf: vec![] }
+    }
+}
+
 // ==================================================================== stolen from sbwt-cli
 // ====================================================================
 // ==================================================================== }
@@ -301,7 +324,7 @@ fn sbwt_count_investigation() {
     };
 
     let vodbg = VoDbg::new(&sbwt, &pnsv_tuned);
-    let counts = Counts::try_new_default(sequence_stream, streaming_index, &vodbg).unwrap();
+    let counts = Counts::try_new_default(sequence_stream, &streaming_index, &vodbg).unwrap();
 
     for i in 0..sbwt.n_sets() {
         let node = sbwt::vodbg::new_node(i, i + 1, sbwt.k());
