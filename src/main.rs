@@ -14,6 +14,7 @@ use sbwt::vodbg::benchmark::benchmark_bms_separate_queries;
 use sbwt::vodbg::count::Counts;
 use sbwt::vodbg::pnsv::{
     self,
+    scan::Scan,
     ABS,
     LcsPnsvBp,
     LcsSimd,

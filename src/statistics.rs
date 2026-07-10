@@ -62,7 +62,7 @@ pub fn simd_scan_compare(args: &mut std::env::Args) {
     let queries = load_query(args);
 
     let iterator = (0..lcs.len()).map(|index| lcs.access(index) as u8);
-    let lcs_simd = LcsSimd::from_iterator(iterator, lcs.len());
+    let lcs_simd = LcsSimd::from_iterator(iterator, lcs.len(), sbwt.k());
 
     let lcs_index = StreamingIndex {
         extend_right: &sbwt,
@@ -108,8 +108,7 @@ pub fn statistics_impl_pnsv(pnsv: &impl Pnsv, n: usize, step: usize, target_leng
 }
 
 pub fn statistics_lcs_simd(lcs_simd: &LcsSimd, target_length: usize, bound: usize) -> (f64, f64, f64, f64) {
-    let n = lcs_simd.n;
-    let target_length = target_length as u8;
+    let n = lcs_simd.len();
 
     let mut successful_previous = 0;
     let start_time = std::time::Instant::now();
@@ -171,7 +170,7 @@ pub fn simd_bounded_scan_time(args: &mut std::env::Args) {
     let upper_bound = 10;
 
     println!("creating lcs_simd...");
-    let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len());
+    let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len(), sbwt.k());
 
     println!("creating matrix...");
     let matrix = PnsvMatrix::from_iterator(iterator, lcs.len(), lower_bound, upper_bound);
@@ -213,13 +212,12 @@ pub fn simd_bounded_scan_time(args: &mut std::env::Args) {
     }
 }
 
-pub fn statistics_lcs_simd_with_matrix_fallback(lcs_simd: &LcsSimd, matrix: &PnsvMatrix, target_length: usize, bound: usize) -> (f64, f64) {
-    let n = lcs_simd.n;
-    let target_length_u8 = target_length as u8;
+pub fn statistics_lcs_simd_with_matrix_fallback(lcs_simd: &impl Scan, matrix: &PnsvMatrix, target_length: usize, bound: usize) -> (f64, f64) {
+    let n = lcs_simd.len();
 
     let start_time = std::time::Instant::now();
     for i in 0..n {
-        if lcs_simd.scan_left_bounded(i, target_length_u8, bound).is_err() {
+        if lcs_simd.scan_left_bounded(i, target_length, bound).is_err() {
             let i = i.saturating_sub(LcsSimd::LANES * bound);
             matrix.previous(i, target_length);
         }
@@ -229,7 +227,7 @@ pub fn statistics_lcs_simd_with_matrix_fallback(lcs_simd: &LcsSimd, matrix: &Pns
 
     let start_time = std::time::Instant::now();
     for i in 0..n {
-        if lcs_simd.scan_right_bounded(i, target_length_u8, bound).is_err() {
+        if lcs_simd.scan_right_bounded(i, target_length, bound).is_err() {
             let i = i + LcsSimd::LANES * bound;
             matrix.next(i, target_length);
         }
@@ -272,7 +270,7 @@ pub fn simd_bounded_scan_with_fallback_time(args: &mut std::env::Args) {
     let target_length_upper = 10;
 
     println!("creating lcs_simd...");
-    let lcs_simd = LcsSimd::from_iterator(iterator.clone(), lcs.len());
+    let lcs_simd = pnsv::scan::LcsSimd8x32::from_iterator(iterator.clone(), lcs.len(), sbwt.k());
 
     println!("creating matrix...");
     let matrix = PnsvMatrix::from_iterator(iterator.clone(), lcs.len(), target_length_lower, target_length_upper);
