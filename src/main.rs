@@ -73,6 +73,7 @@ fn ms_benchmark(args: &mut std::env::Args) {
 
     let lcs = load_lcs(args);
     let scan_bound = parse_scan_bound(args);
+    log::info!("scan bound: {}", scan_bound);
     match flag.as_str() {
         "-safe" => {
             let pnsv = PnsvSafe::new(&sbwt, &lcs, sbwt.k(), scan_bound);
@@ -92,7 +93,7 @@ fn ms_benchmark(args: &mut std::env::Args) {
 fn parse_scan_bound(args: &mut std::env::Args) -> usize {
     if let Some(scan_bound_arg) = args.next() {
         match scan_bound_arg.parse::<usize>() {
-            Ok(value) => value.max(PnsvSafe::DEFAULT_SCAN_BOUND),
+            Ok(value) => value,
             Err(_) => PnsvSafe::DEFAULT_SCAN_BOUND
         }
     } else {
@@ -149,7 +150,7 @@ fn serialize_pnsv_safe(args: &mut std::env::Args) -> std::io::Result<()> {
 
     let file = std::fs::File::create_new(path)?;
     let mut writer = std::io::BufWriter::new(file);
-    let pnsv_safe = PnsvSafe::new_with_default_values(&sbwt, &lcs, sbwt.k());
+    let pnsv_safe = PnsvSafe::new_default(&sbwt, &lcs, sbwt.k());
     pnsv_safe.serialize(&mut writer)?;
     Ok(())
 }
@@ -226,7 +227,7 @@ fn matching_statistics(args: &mut std::env::Args) {
     let index = load_index(args);
     let SbwtIndexVariant::SubsetMatrix(mut sbwt) = index;
     let lcs = load_lcs(args);
-    let pnsv = PnsvTuned::new_with_default_values(&sbwt, &lcs, sbwt.k());
+    let pnsv = PnsvTuned::new_default(&sbwt, &lcs, sbwt.k());
     drop(lcs);
     sbwt.build_select();
     let streaming_index = StreamingIndex {
@@ -359,7 +360,7 @@ fn sbwt_count_investigation() {
         .build_select_support(true)
         .run_from_vecs(&seqs);
     let lcs = lcs.unwrap();
-    let pnsv_tuned = PnsvTuned::new_with_default_values(&sbwt, &lcs, max_k);
+    let pnsv_tuned = PnsvTuned::new_default(&sbwt, &lcs, max_k);
     let sequence_stream = sbwt::VecSeqStream::new(&seqs);
     let streaming_index = StreamingIndex {
         extend_right: &sbwt,
